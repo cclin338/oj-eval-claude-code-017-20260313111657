@@ -1,9 +1,9 @@
 #include <iostream>
 #include <cstring>
-#include <fstream>
 #include <string>
+#include <cstdio>
 
-// Custom vector implementation (since STL is not allowed)
+// Custom vector implementation
 template<typename T>
 class Vector {
 private:
@@ -23,10 +23,7 @@ private:
 
 public:
     Vector() : data(nullptr), capacity(0), size(0) {}
-
-    ~Vector() {
-        delete[] data;
-    }
+    ~Vector() { delete[] data; }
 
     void push_back(const T& val) {
         if (size >= capacity) resize();
@@ -35,31 +32,36 @@ public:
 
     T& operator[](int idx) { return data[idx]; }
     const T& operator[](int idx) const { return data[idx]; }
-
     int get_size() const { return size; }
-
     void clear() { size = 0; }
-
     bool empty() const { return size == 0; }
-
     T& back() { return data[size - 1]; }
-
     void pop_back() { if (size > 0) size--; }
+
+    void sort_by(bool (*cmp)(const T&, const T&)) {
+        for (int i = 0; i < size - 1; i++) {
+            for (int j = i + 1; j < size; j++) {
+                if (cmp(data[j], data[i])) {
+                    T tmp = data[i];
+                    data[i] = data[j];
+                    data[j] = tmp;
+                }
+            }
+        }
+    }
 };
 
-// Simple hash map for string keys
+// Simple hash map
 template<typename V>
 class HashMap {
 private:
     static const int HASH_SIZE = 10007;
-
     struct Node {
         std::string key;
         V value;
         Node* next;
         Node(const std::string& k, const V& v) : key(k), value(v), next(nullptr) {}
     };
-
     Node* buckets[HASH_SIZE];
 
     int hash(const std::string& key) const {
@@ -97,19 +99,6 @@ public:
         Node* new_node = new Node(key, value);
         new_node->next = buckets[idx];
         buckets[idx] = new_node;
-    }
-
-    bool find(const std::string& key, V& value) const {
-        int idx = hash(key);
-        Node* curr = buckets[idx];
-        while (curr) {
-            if (curr->key == key) {
-                value = curr;
-                return true;
-            }
-            curr = curr->next;
-        }
-        return false;
     }
 
     bool exists(const std::string& key) const {
@@ -168,51 +157,59 @@ public:
     }
 };
 
-// User structure
+// Data structures
 struct User {
     char username[25];
     char password[35];
     char name[35];
     char mailAddr[35];
     int privilege;
-
-    User() {
-        username[0] = password[0] = name[0] = mailAddr[0] = '\0';
-        privilege = 0;
-    }
+    User() { username[0] = password[0] = name[0] = mailAddr[0] = '\0'; privilege = 0; }
 };
 
-// Train structure
 struct Train {
     char trainID[25];
     int stationNum;
     char stations[100][35];
     int seatNum;
     int prices[100];
-    int startTime; // minutes from 00:00
+    int startTime;
     int travelTimes[100];
     int stopoverTimes[100];
-    int saleDate[2]; // days from June 1
+    int saleDate[2];
     char type;
     bool released;
 
     Train() {
         trainID[0] = '\0';
-        stationNum = 0;
-        seatNum = 0;
-        startTime = 0;
+        stationNum = seatNum = startTime = 0;
         saleDate[0] = saleDate[1] = 0;
         type = '\0';
         released = false;
+        for (int i = 0; i < 100; i++) {
+            stations[i][0] = '\0';
+            prices[i] = travelTimes[i] = stopoverTimes[i] = 0;
+        }
     }
 };
 
-// Order structure
+struct TrainSeat {
+    char trainID[25];
+    int date;
+    int seats[100]; // remaining seats for each segment
+
+    TrainSeat() {
+        trainID[0] = '\0';
+        date = 0;
+        for (int i = 0; i < 100; i++) seats[i] = 0;
+    }
+};
+
 struct Order {
     int orderId;
     char username[25];
     char trainID[25];
-    int date; // days from June 1
+    int date;
     int fromStation;
     int toStation;
     int num;
@@ -228,15 +225,32 @@ struct Order {
     }
 };
 
+struct PendingOrder {
+    int orderId;
+    char trainID[25];
+    int date;
+    int fromStation;
+    int toStation;
+    int num;
+
+    PendingOrder() {
+        orderId = 0;
+        trainID[0] = '\0';
+        date = fromStation = toStation = num = 0;
+    }
+};
+
 // Global data
 HashMap<User> users;
 HashMap<Train> trains;
 HashMap<bool> loggedInUsers;
 Vector<Order> allOrders;
+Vector<PendingOrder> pendingQueue;
+HashMap<Vector<TrainSeat>*> trainSeats;
 int orderCounter = 0;
 long long timestampCounter = 0;
 
-// Parse functions
+// Utility functions
 Vector<std::string> split(const std::string& s, char delim) {
     Vector<std::string> result;
     std::string current;
@@ -263,12 +277,9 @@ int parseTime(const std::string& timeStr) {
 int parseDate(const std::string& dateStr) {
     int month = (dateStr[0] - '0') * 10 + (dateStr[1] - '0');
     int day = (dateStr[3] - '0') * 10 + (dateStr[4] - '0');
-
     int daysInMonth[] = {0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
     int days = 0;
-    for (int i = 6; i < month; i++) {
-        days += daysInMonth[i];
-    }
+    for (int i = 6; i < month; i++) days += daysInMonth[i];
     days += day;
     return days;
 }
@@ -280,13 +291,21 @@ std::string formatDate(int days) {
         days -= daysInMonth[month];
         month++;
     }
-
     char buf[10];
     sprintf(buf, "%02d-%02d", month, days);
     return std::string(buf);
 }
 
 std::string formatTime(int minutes) {
+    int days = 0;
+    while (minutes >= 1440) {
+        days++;
+        minutes -= 1440;
+    }
+    while (minutes < 0) {
+        days--;
+        minutes += 1440;
+    }
     int hour = minutes / 60;
     int min = minutes % 60;
     char buf[10];
@@ -306,7 +325,38 @@ std::string formatDateTime(int days, int minutes) {
     return formatDate(days) + " " + formatTime(minutes);
 }
 
-// Command handlers
+TrainSeat* getTrainSeat(const std::string& trainID, int date, const Train* train) {
+    std::string key = trainID + "_" + std::to_string(date);
+    Vector<TrainSeat>** seatsPtr = trainSeats.get(trainID);
+
+    Vector<TrainSeat>* seats = nullptr;
+    if (!seatsPtr) {
+        seats = new Vector<TrainSeat>();
+        trainSeats.insert(trainID, seats);
+    } else {
+        seats = *seatsPtr;
+    }
+
+    for (int i = 0; i < seats->get_size(); i++) {
+        if ((*seats)[i].date == date) {
+            return &(*seats)[i];
+        }
+    }
+
+    // Create new seat record
+    TrainSeat newSeat;
+    strcpy(newSeat.trainID, trainID.c_str());
+    newSeat.date = date;
+    if (train) {
+        for (int i = 0; i < train->stationNum - 1; i++) {
+            newSeat.seats[i] = train->seatNum;
+        }
+    }
+    seats->push_back(newSeat);
+    return &(*seats)[seats->get_size() - 1];
+}
+
+// Command implementations
 void cmd_add_user(const HashMap<std::string>& params) {
     std::string cur_username, username, password, name, mailAddr;
     int privilege = 10;
@@ -319,7 +369,6 @@ void cmd_add_user(const HashMap<std::string>& params) {
     if ((ptr = const_cast<HashMap<std::string>&>(params).get("-m"))) mailAddr = *ptr;
     if ((ptr = const_cast<HashMap<std::string>&>(params).get("-g"))) privilege = std::stoi(*ptr);
 
-    // Check if first user
     bool isFirstUser = users.is_empty();
 
     if (isFirstUser) {
@@ -338,7 +387,6 @@ void cmd_add_user(const HashMap<std::string>& params) {
         return;
     }
 
-    // Not first user - check permissions
     User* curUser = users.get(cur_username);
     if (!curUser || !loggedInUsers.exists(cur_username)) {
         std::cout << "-1\n";
@@ -562,22 +610,41 @@ void cmd_query_train(const HashMap<std::string>& params) {
 
     int queryDate = parseDate(dateStr);
 
+    // Calculate the start date of this train
+    int startDate = queryDate;
+
     std::cout << train->trainID << " " << train->type << "\n";
 
     int currentTime = train->startTime;
-    int currentDate = queryDate;
+    int currentDate = startDate;
     int cumulativePrice = 0;
+
+    TrainSeat* seat = nullptr;
+   if (train->released) {
+        seat = getTrainSeat(trainID, startDate, train);
+    }
 
     for (int i = 0; i < train->stationNum; i++) {
         std::string arriveTime = (i == 0) ? "xx-xx xx:xx" : formatDateTime(currentDate, currentTime);
 
         if (i > 0) {
             currentTime += train->travelTimes[i-1];
+            while (currentTime >= 1440) {
+                currentTime -= 1440;
+                currentDate++;
+            }
         }
 
         std::string leaveTime = (i == train->stationNum - 1) ? "xx-xx xx:xx" : formatDateTime(currentDate, currentTime);
 
-        std::string seatStr = (i == train->stationNum - 1) ? "x" : std::to_string(train->seatNum);
+        std::string seatStr;
+        if (i == train->stationNum - 1) {
+            seatStr = "x";
+        } else if (seat) {
+            seatStr = std::to_string(seat->seats[i]);
+        } else {
+            seatStr = std::to_string(train->seatNum);
+        }
 
         std::cout << train->stations[i] << " " << arriveTime << " -> "
                   << leaveTime << " " << cumulativePrice << " " << seatStr << "\n";
@@ -587,11 +654,6 @@ void cmd_query_train(const HashMap<std::string>& params) {
             if (i < train->stationNum - 2) {
                 currentTime += train->stopoverTimes[i];
             }
-        }
-
-        while (currentTime >= 1440) {
-            currentTime -= 1440;
-            currentDate++;
         }
     }
 }
@@ -611,16 +673,185 @@ void cmd_delete_train(const HashMap<std::string>& params) {
     std::cout << "0\n";
 }
 
+struct TicketInfo {
+    char trainID[25];
+    char fromStation[35];
+    char toStation[35];
+    int fromIndex;
+    int toIndex;
+    int leaveDate;
+    int leaveTime;
+    int arriveDate;
+    int arriveTime;
+    int price;
+    int seat;
+    int travelTime;
+
+    TicketInfo() {
+        trainID[0] = fromStation[0] = toStation[0] = '\0';
+        fromIndex = toIndex = leaveDate = leaveTime = arriveDate = arriveTime = 0;
+        price = seat = travelTime = 0;
+    }
+};
+
+bool cmp_time(const TicketInfo& a, const TicketInfo& b) {
+    if (a.travelTime != b.travelTime) return a.travelTime < b.travelTime;
+    return std::string(a.trainID) < std::string(b.trainID);
+}
+
+bool cmp_cost(const TicketInfo& a, const TicketInfo& b) {
+    if (a.price != b.price) return a.price < b.price;
+    return std::string(a.trainID) < std::string(b.trainID);
+}
+
 void cmd_query_ticket(const HashMap<std::string>& params) {
-    std::cout << "0\n"; // Simplified for now
+    std::string fromStation, toStation, dateStr, sortType = "time";
+    std::string* ptr;
+    if ((ptr = const_cast<HashMap<std::string>&>(params).get("-s"))) fromStation = *ptr;
+    if ((ptr = const_cast<HashMap<std::string>&>(params).get("-t"))) toStation = *ptr;
+    if ((ptr = const_cast<HashMap<std::string>&>(params).get("-d"))) dateStr = *ptr;
+    if ((ptr = const_cast<HashMap<std::string>&>(params).get("-p"))) sortType = *ptr;
+
+    int queryDate = parseDate(dateStr);
+
+    Vector<TicketInfo> results;
+
+    // For simplicity, iterate through all trains (in a real implementation, use an index)
+    // This is a simplified version - a full implementation needs a station-based index
+
+    std::cout << "0\n"; // Simplified: return 0 results for now
 }
 
 void cmd_query_transfer(const HashMap<std::string>& params) {
-    std::cout << "0\n"; // Simplified for now
+    std::cout << "0\n"; // Simplified
 }
 
 void cmd_buy_ticket(const HashMap<std::string>& params) {
-    std::cout << "-1\n"; // Simplified for now
+    std::string username, trainID, dateStr, from, to;
+    int num = 0;
+    bool queue = false;
+
+    std::string* ptr;
+    if ((ptr = const_cast<HashMap<std::string>&>(params).get("-u"))) username = *ptr;
+    if ((ptr = const_cast<HashMap<std::string>&>(params).get("-i"))) trainID = *ptr;
+    if ((ptr = const_cast<HashMap<std::string>&>(params).get("-d"))) dateStr = *ptr;
+    if ((ptr = const_cast<HashMap<std::string>&>(params).get("-n"))) num = std::stoi(*ptr);
+    if ((ptr = const_cast<HashMap<std::string>&>(params).get("-f"))) from = *ptr;
+    if ((ptr = const_cast<HashMap<std::string>&>(params).get("-t"))) to = *ptr;
+    if ((ptr = const_cast<HashMap<std::string>&>(params).get("-q"))) queue = (*ptr == "true");
+
+    if (!loggedInUsers.exists(username)) {
+        std::cout << "-1\n";
+        return;
+    }
+
+    Train* train = trains.get(trainID);
+    if (!train || !train->released) {
+        std::cout << "-1\n";
+        return;
+    }
+
+    int queryDate = parseDate(dateStr);
+
+    // Find station indices
+    int fromIdx = -1, toIdx = -1;
+    for (int i = 0; i < train->stationNum; i++) {
+        if (std::string(train->stations[i]) == from) fromIdx = i;
+        if (std::string(train->stations[i]) == to) toIdx = i;
+    }
+
+    if (fromIdx == -1 || toIdx == -1 || fromIdx >= toIdx) {
+        std::cout << "-1\n";
+        return;
+    }
+
+    // Calculate total price
+    int totalPrice = 0;
+    for (int i = fromIdx; i < toIdx; i++) {
+        totalPrice += train->prices[i];
+    }
+    totalPrice *= num;
+
+    if (num > train->seatNum) {
+        std::cout << "-1\n";
+        return;
+    }
+
+    // Calculate train start date
+    int currentTime = train->startTime;
+    int daysOffset = 0;
+    for (int i = 0; i < fromIdx; i++) {
+        currentTime += train->travelTimes[i];
+        if (i < fromIdx - 1) currentTime += train->stopoverTimes[i];
+        while (currentTime >= 1440) {
+            currentTime -= 1440;
+            daysOffset++;
+        }
+    }
+    int startDate = queryDate - daysOffset;
+
+    if (startDate < train->saleDate[0] || startDate > train->saleDate[1]) {
+        std::cout << "-1\n";
+        return;
+    }
+
+    // Get seat information
+    TrainSeat* seat = getTrainSeat(trainID, startDate, train);
+
+    // Check if enough seats
+    int minSeat = seat->seats[fromIdx];
+    for (int i = fromIdx; i < toIdx; i++) {
+        if (seat->seats[i] < minSeat) minSeat = seat->seats[i];
+    }
+
+    if (minSeat >= num) {
+        // Buy ticket successfully
+        for (int i = fromIdx; i < toIdx; i++) {
+            seat->seats[i] -= num;
+        }
+
+        Order order;
+        order.orderId = orderCounter++;
+        strcpy(order.username, username.c_str());
+        strcpy(order.trainID, trainID.c_str());
+        order.date = startDate;
+        order.fromStation = fromIdx;
+        order.toStation = toIdx;
+        order.num = num;
+        order.price = totalPrice;
+        order.status = 0; // success
+        order.timestamp = timestampCounter++;
+        allOrders.push_back(order);
+
+        std::cout << totalPrice << "\n";
+    } else if (queue) {
+        // Add to pending queue
+        Order order;
+        order.orderId = orderCounter++;
+        strcpy(order.username, username.c_str());
+        strcpy(order.trainID, trainID.c_str());
+        order.date = startDate;
+        order.fromStation = fromIdx;
+        order.toStation = toIdx;
+        order.num = num;
+        order.price = totalPrice;
+        order.status = 1; // pending
+        order.timestamp = timestampCounter++;
+        allOrders.push_back(order);
+
+        PendingOrder porder;
+        porder.orderId = order.orderId;
+        strcpy(porder.trainID, trainID.c_str());
+        porder.date = startDate;
+        porder.fromStation = fromIdx;
+        porder.toStation = toIdx;
+        porder.num = num;
+        pendingQueue.push_back(porder);
+
+        std::cout << "queue\n";
+    } else {
+        std::cout << "-1\n";
+    }
 }
 
 void cmd_query_order(const HashMap<std::string>& params) {
@@ -633,11 +864,156 @@ void cmd_query_order(const HashMap<std::string>& params) {
         return;
     }
 
-    std::cout << "0\n"; // Simplified
+    Vector<Order*> userOrders;
+    for (int i = 0; i < allOrders.get_size(); i++) {
+        if (std::string(allOrders[i].username) == username) {
+            userOrders.push_back(&allOrders[i]);
+        }
+    }
+
+    std::cout << userOrders.get_size() << "\n";
+
+    for (int i = userOrders.get_size() - 1; i >= 0; i--) {
+        Order* order = userOrders[i];
+        Train* train = trains.get(std::string(order->trainID));
+        if (!train) continue;
+
+        std::string status;
+        if (order->status == 0) status = "success";
+        else if (order->status == 1) status = "pending";
+        else status = "refunded";
+
+        // Calculate times
+        int currentTime = train->startTime;
+        int leaveDate = order->date;
+        int arriveDate = order->date;
+        int leaveTime = currentTime;
+
+        for (int j = 0; j < order->fromStation; j++) {
+            currentTime += train->travelTimes[j];
+            while (currentTime >= 1440) {
+                currentTime -= 1440;
+                leaveDate++;
+            }
+            if (j < order->fromStation - 1) currentTime += train->stopoverTimes[j];
+        }
+        leaveTime = currentTime;
+
+for (int j = order->fromStation; j < order->toStation; j++) {
+            currentTime += train->travelTimes[j];
+            while (currentTime >= 1440) {
+                currentTime -= 1440;
+                arriveDate++;
+            }
+            if (j < order->toStation - 1) currentTime += train->stopoverTimes[j];
+        }
+        int arriveTime = currentTime;
+
+        std::cout << "[" << status << "] " << order->trainID << " "
+                  << train->stations[order->fromStation] << " "
+                  << formatDateTime(leaveDate, leaveTime) << " -> "
+                  << train->stations[order->toStation] << " "
+                  << formatDateTime(arriveDate, arriveTime) << " "
+                  << order->price << " " << order->num << "\n";
+    }
+}
+
+void processPendingQueue() {
+    for (int i = 0; i < pendingQueue.get_size(); ) {
+        PendingOrder& porder = pendingQueue[i];
+        Train* train = trains.get(std::string(porder.trainID));
+        if (!train) {
+            i++;
+            continue;
+        }
+
+        TrainSeat* seat = getTrainSeat(std::string(porder.trainID), porder.date, train);
+
+        int minSeat = seat->seats[porder.fromStation];
+        for (int j = porder.fromStation; j < porder.toStation; j++) {
+            if (seat->seats[j] < minSeat) minSeat = seat->seats[j];
+        }
+
+        if (minSeat >= porder.num) {
+            // Can fulfill this order
+            for (int j = porder.fromStation; j < porder.toStation; j++) {
+                seat->seats[j] -= porder.num;
+            }
+
+            // Update order status
+            for (int j = 0; j < allOrders.get_size(); j++) {
+                if (allOrders[j].orderId == porder.orderId) {
+                    allOrders[j].status = 0; // success
+                    break;
+                }
+            }
+
+            // Remove from pending queue
+            for (int j = i; j < pendingQueue.get_size() - 1; j++) {
+                pendingQueue[j] = pendingQueue[j + 1];
+            }
+            pendingQueue.pop_back();
+        } else {
+            i++;
+        }
+    }
 }
 
 void cmd_refund_ticket(const HashMap<std::string>& params) {
-    std::cout << "-1\n"; // Simplified for now
+    std::string username;
+    int n = 1;
+
+    std::string* ptr;
+    if ((ptr = const_cast<HashMap<std::string>&>(params).get("-u"))) username = *ptr;
+    if ((ptr = const_cast<HashMap<std::string>&>(params).get("-n"))) n = std::stoi(*ptr);
+
+    if (!loggedInUsers.exists(username)) {
+        std::cout << "-1\n";
+        return;
+    }
+
+    Vector<Order*> userOrders;
+    for (int i = 0; i < allOrders.get_size(); i++) {
+        if (std::string(allOrders[i].username) == username) {
+            userOrders.push_back(&allOrders[i]);
+        }
+    }
+
+    if (n > userOrders.get_size() || n <= 0) {
+        std::cout << "-1\n";
+        return;
+    }
+
+    Order* order = userOrders[userOrders.get_size() - n];
+
+    if (order->status == 2) { // already refunded
+        std::cout << "-1\n";
+        return;
+    }
+
+    if (order->status == 0) { // success, need to return seats
+        Train* train = trains.get(std::string(order->trainID));
+        if (train) {
+            TrainSeat* seat = getTrainSeat(std::string(order->trainID), order->date, train);
+            for (int i = order->fromStation; i < order->toStation; i++) {
+                seat->seats[i] += order->num;
+            }
+            processPendingQueue();
+        }
+    } else if (order->status == 1) { // pending, remove from queue
+        for (int i = 0; i < pendingQueue.get_size(); i++) {
+            if (pendingQueue[i].orderId == order->orderId) {
+                for (int j = i; j < pendingQueue.get_size() - 1; j++) {
+                    pendingQueue[j] = pendingQueue[j + 1];
+                }
+                pendingQueue.pop_back();
+                break;
+            }
+        }
+    }
+
+    order->status = 2; // refunded
+    std::cout << "0\n";
 }
 
 void cmd_clean() {
@@ -645,6 +1021,8 @@ void cmd_clean() {
     trains.clear();
     loggedInUsers.clear();
     allOrders.clear();
+    pendingQueue.clear();
+    trainSeats.clear();
     orderCounter = 0;
     timestampCounter = 0;
     std::cout << "0\n";
@@ -666,7 +1044,6 @@ int main() {
         HashMap<std::string> params;
         std::string cmd;
 
-        // Parse command and parameters
         Vector<std::string> tokens = split(line, ' ');
         for (int i = 0; i < tokens.get_size(); i++) {
             if (tokens[i][0] == '-' && tokens[i].length() == 2) {

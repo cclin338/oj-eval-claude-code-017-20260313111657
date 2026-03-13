@@ -243,6 +243,7 @@ struct PendingOrder {
 // Global data
 HashMap<User> users;
 HashMap<Train> trains;
+Vector<std::string> trainIDs; // List of all train IDs for iteration
 HashMap<bool> loggedInUsers;
 Vector<Order> allOrders;
 Vector<PendingOrder> pendingQueue;
@@ -578,6 +579,7 @@ void cmd_add_train(const HashMap<std::string>& params) {
 
     train.released = false;
     trains.insert(trainID, train);
+    trainIDs.push_back(trainID);
     std::cout << "0\n";
 }
 
@@ -685,6 +687,16 @@ void cmd_delete_train(const HashMap<std::string>& params) {
     }
 
     trains.remove(trainID);
+    // Remove from trainIDs list
+    for (int i = 0; i < trainIDs.get_size(); i++) {
+        if (trainIDs[i] == trainID) {
+            for (int j = i; j < trainIDs.get_size() - 1; j++) {
+                trainIDs[j] = trainIDs[j + 1];
+            }
+            trainIDs.pop_back();
+            break;
+        }
+    }
     std::cout << "0\n";
 }
 
@@ -731,10 +743,110 @@ void cmd_query_ticket(const HashMap<std::string>& params) {
 
     Vector<TicketInfo> results;
 
-    // For simplicity, iterate through all trains (in a real implementation, use an index)
-    // This is a simplified version - a full implementation needs a station-based index
+    // Iterate through all trains
+    for (int i = 0; i < trainIDs.get_size(); i++) {
+        Train* train = trains.get(trainIDs[i]);
+        if (!train || !train->released) continue;
 
-    std::cout << "0\n"; // Simplified: return 0 results for now
+        // Find station indices
+        int fromIdx = -1, toIdx = -1;
+        for (int j = 0; j < train->stationNum; j++) {
+            if (std::string(train->stations[j]) == fromStation) fromIdx = j;
+            if (std::string(train->stations[j]) == toStation) toIdx = j;
+        }
+
+        if (fromIdx == -1 || toIdx == -1 || fromIdx >= toIdx) continue;
+
+        // Calculate when this train departs from fromStation
+        int timeOffset = train->startTime;
+        int dateOffset = 0;
+        for (int j = 0; j < fromIdx; j++) {
+            timeOffset += train->travelTimes[j];
+            while (timeOffset >= 1440) {
+                timeOffset -= 1440;
+                dateOffset++;
+            }
+            if (j < fromIdx - 1) {
+                timeOffset += train->stopoverTimes[j];
+                while (timeOffset >= 1440) {
+                    timeOffset -= 1440;
+                    dateOffset++;
+                }
+            }
+        }
+
+        // startDate is when train actually starts
+        int startDate = queryDate - dateOffset;
+
+        // Check if within sale period
+        if (startDate < train->saleDate[0] || startDate > train->saleDate[1]) continue;
+
+        // Calculate arrival time at toStation
+        int arriveTime = timeOffset;
+        int arriveDateOffset = dateOffset;
+        for (int j = fromIdx; j < toIdx; j++) {
+            arriveTime += train->travelTimes[j];
+            while (arriveTime >= 1440) {
+                arriveTime -= 1440;
+                arriveDateOffset++;
+            }
+            if (j < toIdx - 1) {
+                arriveTime += train->stopoverTimes[j];
+                while (arriveTime >= 1440) {
+                    arriveTime -= 1440;
+                    arriveDateOffset++;
+                }
+            }
+        }
+
+        // Calculate price
+        int totalPrice = 0;
+        for (int j = fromIdx; j < toIdx; j++) {
+            totalPrice += train->prices[j];
+        }
+
+        // Get minimum seats
+        TrainSeat* seat = getTrainSeat(trainIDs[i], startDate, train);
+        int minSeat = seat->seats[fromIdx];
+        for (int j = fromIdx; j < toIdx; j++) {
+            if (seat->seats[j] < minSeat) minSeat = seat->seats[j];
+        }
+
+        // Save result
+        TicketInfo info;
+        strcpy(info.trainID, train->trainID);
+        strcpy(info.fromStation, train->stations[fromIdx]);
+        strcpy(info.toStation, train->stations[toIdx]);
+        info.fromIndex = fromIdx;
+        info.toIndex = toIdx;
+        info.leaveDate = queryDate;
+        info.leaveTime = timeOffset;
+        info.arriveDate = queryDate + (arriveDateOffset - dateOffset);
+        info.arriveTime = arriveTime;
+        info.price = totalPrice;
+        info.seat = minSeat;
+        info.travelTime = (arriveDateOffset - dateOffset) * 1440 + (arriveTime - timeOffset);
+
+        results.push_back(info);
+    }
+
+    // Sort results
+    if (sortType == "cost") {
+        results.sort_by(cmp_cost);
+    } else {
+        results.sort_by(cmp_time);
+    }
+
+    // Output
+    std::cout << results.get_size() << "\n";
+    for (int i = 0; i < results.get_size(); i++) {
+        TicketInfo& info = results[i];
+        std::cout << info.trainID << " " << info.fromStation << " "
+                  << formatDateTime(info.leaveDate, info.leaveTime) << " -> "
+                  << info.toStation << " "
+                  << formatDateTime(info.arriveDate, info.arriveTime) << " "
+                  << info.price << " " << info.seat << "\n";
+    }
 }
 
 void cmd_query_transfer(const HashMap<std::string>& params) {
@@ -1034,6 +1146,7 @@ void cmd_refund_ticket(const HashMap<std::string>& params) {
 void cmd_clean() {
     users.clear();
     trains.clear();
+    trainIDs.clear();
     loggedInUsers.clear();
     allOrders.clear();
     pendingQueue.clear();

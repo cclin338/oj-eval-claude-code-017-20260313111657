@@ -609,34 +609,46 @@ void cmd_query_train(const HashMap<std::string>& params) {
     }
 
     int queryDate = parseDate(dateStr);
-
-    // Calculate the start date of this train
     int startDate = queryDate;
 
     std::cout << train->trainID << " " << train->type << "\n";
 
-    int currentTime = train->startTime;
-    int currentDate = startDate;
-    int cumulativePrice = 0;
-
     TrainSeat* seat = nullptr;
-   if (train->released) {
+    if (train->released) {
         seat = getTrainSeat(trainID, startDate, train);
     }
 
-    for (int i = 0; i < train->stationNum; i++) {
-        std::string arriveTime = (i == 0) ? "xx-xx xx:xx" : formatDateTime(currentDate, currentTime);
+    int cumulativePrice = 0;
+    int currentDate = startDate;
+    int currentTime = train->startTime;
 
-        if (i > 0) {
-            currentTime += train->travelTimes[i-1];
+    for (int i = 0; i < train->stationNum; i++) {
+        // Print arrival time
+        std::string arriveTime;
+        if (i == 0) {
+            arriveTime = "xx-xx xx:xx";
+        } else {
+            arriveTime = formatDateTime(currentDate, currentTime);
+        }
+
+        // Add stopover time (only for middle stations)
+        if (i > 0 && i < train->stationNum - 1) {
+            currentTime += train->stopoverTimes[i - 1];
             while (currentTime >= 1440) {
                 currentTime -= 1440;
                 currentDate++;
             }
         }
 
-        std::string leaveTime = (i == train->stationNum - 1) ? "xx-xx xx:xx" : formatDateTime(currentDate, currentTime);
+        // Print leaving time
+        std::string leaveTime;
+        if (i == train->stationNum - 1) {
+            leaveTime = "xx-xx xx:xx";
+        } else {
+            leaveTime = formatDateTime(currentDate, currentTime);
+        }
 
+        // Get seat count
         std::string seatStr;
         if (i == train->stationNum - 1) {
             seatStr = "x";
@@ -649,10 +661,13 @@ void cmd_query_train(const HashMap<std::string>& params) {
         std::cout << train->stations[i] << " " << arriveTime << " -> "
                   << leaveTime << " " << cumulativePrice << " " << seatStr << "\n";
 
+        // Update for next station
         if (i < train->stationNum - 1) {
             cumulativePrice += train->prices[i];
-            if (i < train->stationNum - 2) {
-                currentTime += train->stopoverTimes[i];
+            currentTime += train->travelTimes[i];
+            while (currentTime >= 1440) {
+                currentTime -= 1440;
+                currentDate++;
             }
         }
     }
